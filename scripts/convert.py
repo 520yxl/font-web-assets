@@ -53,21 +53,33 @@ def validate_sources(sources):
         for key in ('sha256', 'license_sha256'):
             if not re.fullmatch(r'[0-9a-f]{64}', source.get(key, '')):
                 raise ValueError('Missing or invalid ' + key + ': ' + identifier)
-        for key in ('name', 'url', 'license_url', 'license', 'source_url'):
+        for key in ('name', 'url', 'license', 'source_url'):
             if not source.get(key):
                 raise ValueError('Missing ' + key + ': ' + identifier)
+        if not source.get('license_url') and not source.get('license_text'):
+            raise ValueError('Missing license URL or embedded license text')
 
 
 def convert(source):
     data = fetch(source['url'], 100 * 1024 * 1024)
     if hashlib.sha256(data).hexdigest() != source['sha256']:
         raise ValueError('Source SHA-256 mismatch')
-    license_data = fetch(source['license_url'], 1024 * 1024)
+    license_data = (source['license_text'].encode('utf-8') if source.get('license_text')
+                    else fetch(source['license_url'], 1024 * 1024))
     if hashlib.sha256(license_data).hexdigest() != source['license_sha256']:
         raise ValueError('License SHA-256 mismatch')
     # Force a text license, rather than publishing arbitrary binary data.
     license_data.decode('utf-8-sig')
     with TTFont(io.BytesIO(data)) as original:
+        notices = []
+        if 'name' in original:
+            for name in original['name'].names:
+                if name.nameID in (0, 7, 13, 14):
+                    value = name.toUnicode().strip()
+                    if value and value not in notices:
+                        notices.append(value)
+        if notices:
+            license_data += ('\n\nEmbedded font notices:\n' + '\n\n'.join(notices)).encode('utf-8')
         cmap = original.getBestCmap()
         if not cmap:
             raise ValueError('Font has no supported Unicode character map')
