@@ -1,0 +1,38 @@
+name: Convert fonts to WOFF2
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: Font files to attempt (1-100)
+        default: '20'
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: webfont-publish
+  cancel-in-progress: false
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Convert one batch
+        env:
+          BATCH_SIZE: ${{ inputs.batch_size }}
+        run: python scripts/convert.py --limit "$BATCH_SIZE" --seconds 900
+      - name: Persist successful assets and processing state
+        if: ${{ !cancelled() }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add catalog.json conversion-state.json
+          if [ -d fonts ]; then git add fonts; fi
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Publish converted WOFF2 batch'
+          git push origin HEAD:main
